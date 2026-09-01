@@ -41,7 +41,8 @@ public class MTEHatchInputBusGui extends MTEHatchBaseGui<MTEHatchInputBus> {
                 CommonButtons.createToggleButton(
                     insertionSync,
                     GTGuiTextures.OVERLAY_BUTTON_ONE_STACK_LIMIT,
-                    "GT5U.machines.one_stack_limit.tooltip"));
+                    "GT5U.machines.one_stack_limit.tooltip"))
+            .childIf(supportsSlotLockButton(), this::createSlotLockButton);
     }
 
     @Override
@@ -63,6 +64,7 @@ public class MTEHatchInputBusGui extends MTEHatchBaseGui<MTEHatchInputBus> {
     protected ParentWidget<?> createContentSection(ModularPanel panel, PanelSyncManager syncManager) {
         return super.createContentSection(panel, syncManager).child(
             new ItemSlotGridBuilder(machine.inventoryHandler, syncManager).size(getDimension())
+                .itemSlotSupplier(this::createMachineItemSlot)
                 .build()
                 .center());
     }
@@ -70,5 +72,10 @@ public class MTEHatchInputBusGui extends MTEHatchBaseGui<MTEHatchInputBus> {
     @Override
     protected boolean supportsBottomRowOverlap() {
         return getDimension() <= 4;
+    }
+
+    @Override
+    protected boolean usesSlotLockUi() {
+        return true;
     }
 }

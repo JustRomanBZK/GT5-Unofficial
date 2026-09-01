@@ -34,6 +34,11 @@ import gregtech.api.util.GTUtility;
 @IMetaTileEntity.SkipGenerateDescription
 public class MTEHatchVoidBus extends MTEHatchOutputBus implements IAddGregtechLogo {
 
+    @Override
+    public boolean supportsSlotLocking() {
+        return false;
+    }
+
     private static final String DATA_STICK_DATA_TYPE = "voidBusFilter";
     private static final String LOCKED_ITEMS_NBT_KEY = "lockedItems";
 

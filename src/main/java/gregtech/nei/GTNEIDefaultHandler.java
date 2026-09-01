@@ -23,6 +23,8 @@ import javax.annotation.Nullable;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.FontRenderer;
+import net.minecraft.client.gui.inventory.GuiContainer;
+import net.minecraft.inventory.Container;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.StatCollector;
 import net.minecraftforge.fluids.FluidStack;
@@ -42,6 +44,8 @@ import com.gtnewhorizons.modularui.api.widget.Widget;
 import com.gtnewhorizons.modularui.common.widget.SlotWidget;
 
 import codechicken.nei.PositionedStack;
+import codechicken.nei.api.IOverlayHandler;
+import codechicken.nei.api.IRecipeOverlayRenderer;
 import codechicken.nei.recipe.Badge;
 import codechicken.nei.recipe.GuiRecipe;
 import codechicken.nei.recipe.ICraftingHandler;
@@ -376,6 +380,23 @@ public class GTNEIDefaultHandler extends TemplateRecipeHandler {
     @Override
     public String getOverlayIdentifier() {
         return recipeCategory.unlocalizedName;
+    }
+
+    @Override
+    public boolean hasOverlay(GuiContainer gui, Container container, int recipe) {
+        return super.hasOverlay(gui, container, recipe) || SlotLockOverlayHandler.canHandle(gui, recipeMap);
+    }
+
+    @Override
+    public IRecipeOverlayRenderer getOverlayRenderer(GuiContainer gui, int recipe) {
+        if (SlotLockOverlayHandler.canHandle(gui, recipeMap)) return null;
+        return super.getOverlayRenderer(gui, recipe);
+    }
+
+    @Override
+    public IOverlayHandler getOverlayHandler(GuiContainer gui, int recipe) {
+        if (SlotLockOverlayHandler.canHandle(gui, recipeMap)) return SlotLockOverlayHandler.INSTANCE;
+        return super.getOverlayHandler(gui, recipe);
     }
 
     @Override

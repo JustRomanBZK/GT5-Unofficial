@@ -127,7 +127,7 @@ public class MTEBasicMachineBaseGui<T extends MTEBasicMachine> extends MTETiered
     @Override
     protected Flow createBottomLeftCornerFlow(ModularPanel panel, PanelSyncManager syncManager) {
         Flow cornerFlow = super.createBottomLeftCornerFlow(panel, syncManager);
-        if (machine.isSteampowered()) return cornerFlow;
+        if (machine.isSteampowered()) return cornerFlow.childIf(supportsSlotLockButton(), this::createSlotLockButton);
 
         return cornerFlow
             .child(
@@ -146,7 +146,7 @@ public class MTEBasicMachineBaseGui<T extends MTEBasicMachine> extends MTETiered
                     GTGuiTextures.OVERLAY_BUTTON_AUTOOUTPUT_ITEM,
                     BaseTileEntity.ITEM_TRANSFER_TOOLTIP,
                     "GT5U.gui.button.forbidden.reason.item"))
-
+            .childIf(supportsSlotLockButton(), this::createSlotLockButton)
             .childIf(properties.maxFluidInputs > 0, () -> createFluidInputSlot().marginLeft(SLOT_SIZE / 2));
     }
 
@@ -348,7 +348,8 @@ public class MTEBasicMachineBaseGui<T extends MTEBasicMachine> extends MTETiered
                         mapInSlotsToMatrix(),
                         (_, _, i,
                             key) -> key == 'c'
-                                ? new ItemSlot().backgroundOverlay(slotOverlayFunction.apply(i, false, false, false))
+                                ? createMachineItemSlot()
+                                    .backgroundOverlay(slotOverlayFunction.apply(i, false, false, false))
                                     .slot(
                                         new MachineModularSlot(
                                             machine.inventoryHandler,
@@ -381,7 +382,8 @@ public class MTEBasicMachineBaseGui<T extends MTEBasicMachine> extends MTETiered
                         mapOutSlotsToMatrix(),
                         (_, _, i,
                             key) -> key == 'c'
-                                ? new ItemSlot().backgroundOverlay(slotOverlayFunction.apply(i, false, true, false))
+                                ? createMachineItemSlot()
+                                    .backgroundOverlay(slotOverlayFunction.apply(i, false, true, false))
                                     .slot(
                                         new MachineModularSlot(
                                             machine.inventoryHandler,
@@ -498,5 +500,10 @@ public class MTEBasicMachineBaseGui<T extends MTEBasicMachine> extends MTETiered
     @Override
     protected boolean doesAddGregTechLogo() {
         return this.mAddGregTechLogo;
+    }
+
+    @Override
+    protected boolean usesSlotLockUi() {
+        return true;
     }
 }

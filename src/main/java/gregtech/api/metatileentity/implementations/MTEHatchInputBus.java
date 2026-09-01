@@ -5,7 +5,9 @@ import static gregtech.api.enums.Textures.BlockIcons.OVERLAY_PIPE_COLORS;
 import static gregtech.api.enums.Textures.BlockIcons.OVERLAY_PIPE_IN;
 import static gregtech.api.metatileentity.BaseTileEntity.TOOLTIP_DELAY;
 
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
@@ -18,6 +20,9 @@ import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.fluids.FluidStack;
+
+import org.jetbrains.annotations.Nullable;
 
 import com.cleanroommc.modularui.factory.PosGuiData;
 import com.cleanroommc.modularui.screen.ModularPanel;
@@ -33,6 +38,7 @@ import gregtech.api.gui.modularui.GTUITextures;
 import gregtech.api.interfaces.IConfigurationCircuitSupport;
 import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
+import gregtech.api.interfaces.metatileentity.ISlotLockable;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.MetaTileEntity;
 import gregtech.api.recipe.RecipeMap;
@@ -42,13 +48,16 @@ import gregtech.api.util.GTOreDictUnificator;
 import gregtech.api.util.GTSplit;
 import gregtech.api.util.GTTooltipDataCache;
 import gregtech.api.util.GTUtility;
+import gregtech.api.util.slotlock.SlotLockState;
+import gregtech.api.util.slotlock.SlotLockTarget;
 import gregtech.common.gui.modularui.hatch.MTEHatchInputBusGui;
 import gregtech.common.tileentities.machines.ISmartInputHatch;
 import mcp.mobius.waila.api.IWailaConfigHandler;
 import mcp.mobius.waila.api.IWailaDataAccessor;
 
 @IMetaTileEntity.SkipGenerateDescription
-public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitSupport, ISmartInputHatch {
+public class MTEHatchInputBus extends MTEHatch
+    implements IConfigurationCircuitSupport, ISmartInputHatch, ISlotLockable {
 
     private static final String SORTING_MODE_TOOLTIP = "GT5U.machines.sorting_mode.tooltip";
     private static final String ONE_STACK_LIMIT_TOOLTIP = "GT5U.machines.one_stack_limit.tooltip";
@@ -59,6 +68,10 @@ public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitS
     public boolean disableFilter = true;
     public boolean disableLimited = true;
     protected int uiButtonCount = 0;
+    /**
+     * Lock state of the item slots, see {@link ISlotLockable}.
+     */
+    public final SlotLockState slotLocks = new SlotLockState(mInventory.length);
 
     public MTEHatchInputBus(int id, String name, String nameRegional, int tier) {
         this(id, name, nameRegional, tier, getSlots(tier) + 1);
@@ -156,7 +169,7 @@ public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitS
     public void updateSlots() {
         for (int i = 0; i < mInventory.length - 1; i++)
             if (mInventory[i] != null && mInventory[i].stackSize <= 0) mInventory[i] = null;
-        if (!disableSort) fillStacksIntoFirstSlots();
+        if (!disableSort && !slotLocks.hasAnyLock()) fillStacksIntoFirstSlots();
     }
 
     protected void fillStacksIntoFirstSlots() {
@@ -173,6 +186,7 @@ public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitS
             aNBT.setString("recipeMap", mRecipeMap.unlocalizedName);
         }
         aNBT.setBoolean("migrationCircuitSlot", true);
+        slotLocks.save(aNBT);
     }
 
     @Override
@@ -184,6 +198,7 @@ public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitS
             disableLimited = aNBT.getBoolean("disableLimited");
         }
         mRecipeMap = RecipeMap.getFromOldIdentifier(aNBT.getString("recipeMap"));
+        slotLocks.load(aNBT);
 
         // TODO Delete this code after one update. Also, don't forget to delete the NbtTag - "migrationCircuitSlot".
         if (allowSelectCircuit()) {
@@ -238,8 +253,81 @@ public class MTEHatchInputBus extends MTEHatch implements IConfigurationCircuitS
         ItemStack aStack) {
         return side == getBaseMetaTileEntity().getFrontFacing() && aIndex != getCircuitSlot()
             && (mRecipeMap == null || disableFilter || mRecipeMap.containsInput(aStack))
-            && (disableLimited || limitedAllowPutStack(aIndex, aStack));
+            && (disableLimited || limitedAllowPutStack(aIndex, aStack))
+            && slotLocks.isItemAllowed(aIndex, aStack)
+            && !slotLocks.isFull(aIndex, mInventory[aIndex]);
     }
+
+    @Override
+    public boolean isItemValidForSlot(int index, ItemStack itemStack) {
+        return super.isItemValidForSlot(index, itemStack) && slotLocks.isItemAllowed(index, itemStack);
+    }
+
+    @Override
+    public int getSlotLimit(int slot) {
+        return Math.min(super.getSlotLimit(slot), slotLocks.getCapacity(slot));
+    }
+
+    // region ISlotLockable
+
+    @Override
+    public SlotLockState getSlotLockState() {
+        return slotLocks;
+    }
+
+    @Override
+    public int[] getLockableInputSlots() {
+        List<Integer> slots = new ArrayList<>();
+        for (int i = 0; i < mInventory.length; i++) {
+            if (i != getCircuitSlot() && isValidSlot(i)) slots.add(i);
+        }
+        int[] result = new int[slots.size()];
+        for (int i = 0; i < result.length; i++) result[i] = slots.get(i);
+        return result;
+    }
+
+    @Override
+    public int[] getLockableOutputSlots() {
+        return new int[0];
+    }
+
+    @Override
+    public boolean acceptsRecipeLock(@Nullable RecipeMap<?> recipeMap) {
+        return supportsSlotLocking() && recipeMap != null && (mRecipeMap == null || mRecipeMap == recipeMap);
+    }
+
+    @Override
+    public boolean supportsSlotLocking() {
+        // Subclasses with custom GUIs do not render the lock state; they have to opt in explicitly
+        return getClass() == MTEHatchInputBus.class;
+    }
+
+    @Override
+    public void lockSlotsToRecipe(List<ItemStack> inputs, List<ItemStack> outputs, List<FluidStack> fluidInputs,
+        List<FluidStack> fluidOutputs) {
+        if (!supportsSlotLocking()) return;
+        slotLocks.lockToRecipe(inputs, Collections.emptyList(), getLockableInputSlots(), new int[0], mInventory);
+        onSlotLocksChanged();
+    }
+
+    @Override
+    public SlotLockTarget getInputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, getLockableInputSlots());
+    }
+
+    @Override
+    public SlotLockTarget getOutputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, new int[0]);
+    }
+
+    @Override
+    public void onSlotLocksChanged() {
+        markDirty();
+        IGregTechTileEntity base = getBaseMetaTileEntity();
+        if (base != null) base.markInventoryBeenModified();
+    }
+
+    // endregion
 
     protected boolean limitedAllowPutStack(int aIndex, ItemStack aStack) {
         for (int i = 0; i < getSizeInventory(); i++)

@@ -97,11 +97,14 @@ import gregtech.api.gui.widgets.CheckboxWidget;
 import gregtech.api.interfaces.IOutputBus;
 import gregtech.api.interfaces.IOutputHatch;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
+import gregtech.api.interfaces.metatileentity.IRecipeSlotLockTarget;
+import gregtech.api.interfaces.metatileentity.ISlotLockable;
 import gregtech.api.interfaces.modularui.IAddGregtechLogo;
 import gregtech.api.interfaces.modularui.IAddUIWidgets;
 import gregtech.api.interfaces.modularui.IBindPlayerInventoryUI;
 import gregtech.api.interfaces.modularui.IControllerWithOptionalFeatures;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
+import gregtech.api.interfaces.tileentity.RecipeMapWorkable;
 import gregtech.api.logic.ProcessingLogic;
 import gregtech.api.metatileentity.MetaTileEntity;
 import gregtech.api.recipe.RecipeMap;
@@ -126,6 +129,9 @@ import gregtech.api.util.ParallelHelper;
 import gregtech.api.util.VoidProtectionHelper;
 import gregtech.api.util.shutdown.ShutDownReason;
 import gregtech.api.util.shutdown.ShutDownReasonRegistry;
+import gregtech.api.util.slotlock.FluidLockHelper;
+import gregtech.api.util.slotlock.SlotLockState;
+import gregtech.api.util.slotlock.SlotLockTarget;
 import gregtech.client.GTSoundLoop;
 import gregtech.client.volumetric.ISoundPosition;
 import gregtech.common.config.MachineStats;
@@ -172,8 +178,8 @@ import tectech.thing.metaTileEntity.hatch.MTEHatchDynamoMulti;
 import tectech.thing.metaTileEntity.hatch.MTEHatchDynamoTunnel;
 import tectech.thing.metaTileEntity.hatch.MTEHatchEnergyMulti;
 
-public abstract class MTEMultiBlockBase extends MetaTileEntity
-    implements IControllerWithOptionalFeatures, IAddGregtechLogo, IAddUIWidgets, IBindPlayerInventoryUI, IHatchWatcher {
+public abstract class MTEMultiBlockBase extends MetaTileEntity implements IControllerWithOptionalFeatures,
+    IAddGregtechLogo, IAddUIWidgets, IBindPlayerInventoryUI, IHatchWatcher, IRecipeSlotLockTarget {
 
     public static boolean disableMaintenance;
     public boolean hasMaintenanceChecks = getDefaultHasMaintenanceChecks();
@@ -3420,6 +3426,47 @@ public abstract class MTEMultiBlockBase extends MetaTileEntity
             .setSize(16, 16);
         return (ButtonWidget) button;
     }
+
+    // region IRecipeSlotLockTarget
+
+    @Override
+    public boolean acceptsRecipeLock(@Nullable RecipeMap<?> recipeMap) {
+        if (recipeMap == null) return false;
+        if (this instanceof RecipeMapWorkable workable) {
+            return workable.getAvailableRecipeMaps()
+                .contains(recipeMap);
+        }
+        return recipeMap == getRecipeMap();
+    }
+
+    /**
+     * Locks the slots of the attached input and output busses and the fluid lock of the attached input and output
+     * hatches to the given recipe. Only hatches whose GUI renders the lock state take part.
+     */
+    @Override
+    public void lockSlotsToRecipe(List<ItemStack> inputs, List<ItemStack> outputs, List<FluidStack> fluidInputs,
+        List<FluidStack> fluidOutputs) {
+        List<SlotLockTarget> inputTargets = new ArrayList<>();
+        List<ISlotLockable> changed = new ArrayList<>();
+        for (MTEHatchInputBus bus : validMTEList(mInputBusses)) {
+            if (!bus.supportsSlotLocking()) continue;
+            inputTargets.add(bus.getInputLockTarget());
+            changed.add(bus);
+        }
+        List<SlotLockTarget> outputTargets = new ArrayList<>();
+        for (MTEHatchOutputBus bus : validMTEList(mOutputBusses)) {
+            if (!bus.supportsSlotLocking()) continue;
+            outputTargets.add(bus.getOutputLockTarget());
+            changed.add(bus);
+        }
+        SlotLockState.lockToRecipe(inputs, outputs, inputTargets, outputTargets);
+        for (ISlotLockable lockable : changed) lockable.onSlotLocksChanged();
+
+        FluidLockHelper.lockHatchesToFluids(fluidInputs, validMTEList(mInputHatches), true);
+        FluidLockHelper.lockHatchesToFluids(fluidOutputs, validMTEList(mOutputHatches), false);
+    }
+
+    // endregion
 
     public boolean shouldDisplayCheckRecipeResult() {
         return true;

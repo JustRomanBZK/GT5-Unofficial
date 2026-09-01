@@ -6,7 +6,10 @@ import java.util.Arrays;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import net.minecraft.util.StatCollector;
+
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import com.cleanroommc.modularui.api.drawable.IDrawable;
 import com.cleanroommc.modularui.api.widget.IWidget;
@@ -16,6 +19,7 @@ import com.cleanroommc.modularui.screen.ModularPanel;
 import com.cleanroommc.modularui.screen.RichTooltip;
 import com.cleanroommc.modularui.screen.UISettings;
 import com.cleanroommc.modularui.utils.Alignment;
+import com.cleanroommc.modularui.value.BoolValue;
 import com.cleanroommc.modularui.value.sync.BooleanSyncValue;
 import com.cleanroommc.modularui.value.sync.PanelSyncManager;
 import com.cleanroommc.modularui.widget.ParentWidget;
@@ -27,6 +31,7 @@ import com.cleanroommc.modularui.widgets.slot.ItemSlot;
 import com.cleanroommc.modularui.widgets.slot.ModularSlot;
 
 import gregtech.api.interfaces.IConfigurationCircuitSupport;
+import gregtech.api.interfaces.metatileentity.ISlotLockable;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.implementations.MTETieredMachineBlock;
 import gregtech.api.modularui2.GTGuiTextures;
@@ -36,6 +41,8 @@ import gregtech.api.modularui2.common.CommonWidgets;
 import gregtech.api.util.GTTooltipDataCache;
 import gregtech.api.util.GTUtility;
 import gregtech.common.modularui2.factory.GTBaseGuiBuilder;
+import gregtech.common.modularui2.sync.SlotLockSyncHandler;
+import gregtech.common.modularui2.widget.LockableItemSlot;
 
 /**
  * A base class for singleblock MUI2 guis. Has configurable corner panels and makes building ui's easier.
@@ -59,6 +66,11 @@ public class MTETieredMachineBlockBaseGui<T extends MTETieredMachineBlock> {
     }
 
     private final int borderRadius = 4;
+
+    /**
+     * Sync handler for slot locking, null if the machine does not support it.
+     */
+    protected @Nullable SlotLockSyncHandler slotLockHandler;
 
     public ModularPanel build(PosGuiData guiData, PanelSyncManager syncManager, UISettings uiSettings) {
         registerSyncValues(syncManager);
@@ -85,6 +97,64 @@ public class MTETieredMachineBlockBaseGui<T extends MTETieredMachineBlock> {
             baseMetaTileEntity::isMuffled,
             baseMetaTileEntity::setMuffler).allowC2S();
         syncManager.syncValue("mufflerSyncer", mufflerSyncer);
+
+        if (usesSlotLockUi() && machine instanceof ISlotLockable lockable && lockable.supportsSlotLocking()) {
+            slotLockHandler = new SlotLockSyncHandler(lockable);
+            syncManager.syncValue(SlotLockSyncHandler.KEY, slotLockHandler);
+        }
+    }
+
+    /**
+     * Creates an item slot widget for a machine inventory slot. The slot supports locking if the machine implements
+     * {@link ISlotLockable}.
+     */
+    protected ItemSlot createMachineItemSlot() {
+        return slotLockHandler != null ? new LockableItemSlot(slotLockHandler) : new ItemSlot();
+    }
+
+    protected boolean supportsSlotLockButton() {
+        return slotLockHandler != null;
+    }
+
+    /**
+     * Whether this GUI renders slot locks (lockable item slots and the lock mode button). Only GUIs returning true get
+     * a {@link SlotLockSyncHandler}, so that locks can never be set through a GUI that does not show them.
+     */
+    protected boolean usesSlotLockUi() {
+        return false;
+    }
+
+    /**
+     * Creates the button toggling the slot lock editing mode. Shift-click locks or unlocks all slots.
+     */
+    protected IWidget createSlotLockButton() {
+        final SlotLockSyncHandler handler = slotLockHandler;
+        if (handler == null) return IDrawable.EMPTY.asWidget();
+        ToggleButton button = new ToggleButton() {
+
+            @Override
+            public @NotNull Result onMousePressed(int mouseButton) {
+                if (Interactable.hasShiftDown()) {
+                    handler.requestLockAll(handler.hasUnlockedSlot());
+                    return Result.SUCCESS;
+                }
+                return super.onMousePressed(mouseButton);
+            }
+        };
+        return button.value(new BoolValue.Dynamic(handler::isLockingMode, handler::setLockingMode))
+            .overlay(GTGuiTextures.OVERLAY_BUTTON_LOCK)
+            .tooltipAutoUpdate(true)
+            .tooltipDynamic(tooltip -> {
+                tooltip.addLine(StatCollector.translateToLocal("GT5U.gui.slot_lock.button"));
+                tooltip.addLine(
+                    StatCollector.translateToLocal(
+                        handler.isLockingMode() ? "GT5U.gui.slot_lock.button.on" : "GT5U.gui.slot_lock.button.off"));
+                tooltip.addLine(
+                    StatCollector.translateToLocal(
+                        handler.hasUnlockedSlot() ? "GT5U.gui.slot_lock.button.lock_all"
+                            : "GT5U.gui.slot_lock.button.unlock_all"));
+            })
+            .tooltipShowUpTimer(TOOLTIP_DELAY);
     }
 
     protected ModularPanel getBasePanel(PosGuiData guiData, PanelSyncManager syncManager, UISettings uiSettings) {

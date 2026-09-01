@@ -46,6 +46,7 @@ import net.minecraftforge.fluids.IFluidHandler;
 
 import org.apache.commons.lang3.tuple.Pair;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.Nullable;
 
 import com.gtnewhorizons.modularui.api.drawable.IDrawable;
 import com.gtnewhorizons.modularui.api.math.Pos2d;
@@ -75,6 +76,7 @@ import gregtech.api.interfaces.ICleanroom;
 import gregtech.api.interfaces.IConfigurationCircuitSupport;
 import gregtech.api.interfaces.INonConsumedItemDisplay;
 import gregtech.api.interfaces.ITexture;
+import gregtech.api.interfaces.metatileentity.ISlotLockable;
 import gregtech.api.interfaces.modularui.IAddGregtechLogo;
 import gregtech.api.interfaces.tileentity.IGregTechDeviceInformation;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
@@ -95,6 +97,8 @@ import gregtech.api.util.GTTooltipDataCache;
 import gregtech.api.util.GTUtility;
 import gregtech.api.util.GTWaila;
 import gregtech.api.util.OverclockCalculator;
+import gregtech.api.util.slotlock.SlotLockState;
+import gregtech.api.util.slotlock.SlotLockTarget;
 import gregtech.client.GTSoundLoop;
 import gregtech.common.gui.modularui.UIHelper;
 import mcp.mobius.waila.api.IWailaConfigHandler;
@@ -107,7 +111,7 @@ import mcp.mobius.waila.api.IWailaDataAccessor;
  * Machine
  */
 public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapWorkable, IConfigurationCircuitSupport,
-    IOverclockDescriptionProvider, IAddGregtechLogo, INonConsumedItemDisplay {
+    IOverclockDescriptionProvider, IAddGregtechLogo, INonConsumedItemDisplay, ISlotLockable {
 
     /**
      * return values for checkRecipe()
@@ -119,6 +123,10 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
     public static final int OTHER_SLOT_COUNT = 5;
     public final ItemStack[] mOutputItems;
     public final int mInputSlotCount;
+    /**
+     * Lock state of the input and output slots, see {@link ISlotLockable}.
+     */
+    public final SlotLockState slotLocks;
     public int mAmperage;
     public boolean mAllowInputFromOutputSide = true, mFluidTransfer = false, mItemTransfer = false, mStuttering = false,
         mCharge = false, mDecharge = false;
@@ -171,6 +179,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         mInputSlotCount = Math.max(0, aInputSlotCount);
         mOutputItems = new ItemStack[Math.max(0, aOutputSlotCount)];
         mAmperage = aAmperage;
+        slotLocks = new SlotLockState(mInventory.length);
         overclockDescriber = createOverclockDescriber();
     }
 
@@ -190,6 +199,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         mInputSlotCount = Math.max(0, aInputSlotCount);
         mOutputItems = new ItemStack[Math.max(0, aOutputSlotCount)];
         mAmperage = aAmperage;
+        slotLocks = new SlotLockState(mInventory.length);
         overclockDescriber = createOverclockDescriber();
     }
 
@@ -202,6 +212,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         mInputSlotCount = Math.max(0, aInputSlotCount);
         mOutputItems = new ItemStack[Math.max(0, aOutputSlotCount)];
         mAmperage = aAmperage;
+        slotLocks = new SlotLockState(mInventory.length);
         overclockDescriber = createOverclockDescriber();
         // In world basic machine have mMainFacing UNKNOWN for rotation fixes.
         // During placement, mFacing initially mean main facing.
@@ -527,6 +538,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
 
         for (int i = 0; i < mOutputItems.length; i++)
             if (mOutputItems[i] != null) GTUtility.saveItem(aNBT, "mOutputItem" + i, mOutputItems[i]);
+        slotLocks.save(aNBT);
     }
 
     @Override
@@ -545,6 +557,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         mFluidOut = FluidStack.loadFluidStackFromNBT(aNBT.getCompoundTag("mFluidOut"));
 
         for (int i = 0; i < mOutputItems.length; i++) mOutputItems[i] = GTUtility.loadItem(aNBT, "mOutputItem" + i);
+        slotLocks.load(aNBT);
     }
 
     /**
@@ -577,10 +590,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
                 if (mProgresstime < 0 || drainEnergyForProcess(mEUt)) {
                     aBaseMetaTileEntity.setActive(mProgresstime >= 0);
                     if (++mProgresstime >= mMaxProgresstime) {
-                        for (int i = 0; i < mOutputItems.length; i++)
-                            for (int j = 0; j < mOutputItems.length; j++) if (aBaseMetaTileEntity
-                                .addStackToSlot(getOutputSlot() + ((j + i) % mOutputItems.length), mOutputItems[i]))
-                                break;
+                        placeOutputItems(aBaseMetaTileEntity);
                         if (mOutputFluid != null)
                             if (getDrainableStack() == null) setDrainableStack(mOutputFluid.copy());
                             else if (mOutputFluid.isFluidEqual(getDrainableStack()))
@@ -664,11 +674,13 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
                         if (GTUtility.isDebugItem(mInventory[dechargerSlotStartIndex()])) {
                             mEUt = mMaxProgresstime = 1;
                         }
+                        reserveOutputSlots();
                         startProcess();
                     } else {
                         mMaxProgresstime = 0;
                         Arrays.fill(mOutputItems, null);
                         mOutputFluid = null;
+                        slotLocks.clearMachineLocks(getLockableOutputSlots(), mInventory);
                     }
                 }
             } else {
@@ -744,15 +756,95 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
 
     protected boolean canOutput(ItemStack... aOutputs) {
         if (aOutputs == null) return true;
-        ItemStack[] tOutputSlots = getAllOutputs();
-        for (int i = 0; i < tOutputSlots.length && i < aOutputs.length; i++)
-            if (tOutputSlots[i] != null && aOutputs[i] != null
-                && (!GTUtility.areStacksEqual(tOutputSlots[i], aOutputs[i], false)
-                    || tOutputSlots[i].stackSize + aOutputs[i].stackSize > tOutputSlots[i].getMaxStackSize())) {
-                        mOutputBlocked++;
-                        return false;
-                    }
+        if (simulateOutputPlacement(aOutputs, null) == null) {
+            mOutputBlocked++;
+            return false;
+        }
         return true;
+    }
+
+    /**
+     * Simulates {@link #placeOutputItems} respecting slot locks and capacities. Mirrors the placement order: output i
+     * prefers output slot i and a stack is never split across slots.
+     *
+     * @param aOutputs     the outputs to place
+     * @param aTargetSlots if not null, receives the chosen inventory slot index for every output (-1 if none)
+     * @return the target slots, or null if at least one output does not fit
+     */
+    @Nullable
+    protected int[] simulateOutputPlacement(ItemStack[] aOutputs, @Nullable int[] aTargetSlots) {
+        final int len = mOutputItems.length;
+        final ItemStack[] simItems = new ItemStack[len];
+        final int[] simSizes = new int[len];
+        for (int i = 0; i < len; i++) {
+            ItemStack stack = getOutputAt(i);
+            simItems[i] = stack;
+            simSizes[i] = stack == null ? 0 : stack.stackSize;
+        }
+        int[] targets = aTargetSlots != null ? aTargetSlots : new int[aOutputs.length];
+        Arrays.fill(targets, -1);
+        for (int i = 0; i < aOutputs.length; i++) {
+            ItemStack output = aOutputs[i];
+            if (output == null) continue;
+            boolean placed = false;
+            for (int j = 0; j < len; j++) {
+                int index = (j + i) % len;
+                int slot = getOutputSlot() + index;
+                if (!slotLocks.isItemAllowed(slot, output)) continue;
+                if (simItems[index] != null && !GTUtility.areStacksEqual(simItems[index], output, false)) continue;
+                int limit = Math.min(getInventoryStackLimit(), slotLocks.getCapacityFor(slot, output));
+                if (simSizes[index] + output.stackSize > limit) continue;
+                simItems[index] = output;
+                simSizes[index] += output.stackSize;
+                targets[i] = slot;
+                placed = true;
+                break;
+            }
+            if (!placed) return null;
+        }
+        return targets;
+    }
+
+    /**
+     * Reserves the output slots for the outputs of the recipe that is about to start, so that nothing else can be
+     * inserted into them while the recipe is running.
+     */
+    protected void reserveOutputSlots() {
+        int[] targets = simulateOutputPlacement(mOutputItems, null);
+        if (targets == null) return;
+        for (int i = 0; i < targets.length; i++) {
+            if (targets[i] >= 0) slotLocks.enableMachineLock(targets[i], mOutputItems[i]);
+        }
+    }
+
+    /**
+     * Moves the finished recipe outputs into the output slots and releases the machine locks.
+     */
+    protected void placeOutputItems(IGregTechTileEntity aBaseMetaTileEntity) {
+        final int len = mOutputItems.length;
+        for (int i = 0; i < len; i++) {
+            ItemStack output = mOutputItems[i];
+            if (output == null) continue;
+            boolean placed = false;
+            for (int j = 0; j < len && !placed; j++) {
+                int slot = getOutputSlot() + ((j + i) % len);
+                if (!slotLocks.isItemAllowed(slot, output)) continue;
+                placed = aBaseMetaTileEntity.addStackToSlot(slot, output);
+            }
+            // The capacity might have been reduced while processing: never void outputs because of it
+            for (int j = 0; j < len && !placed; j++) {
+                int slot = getOutputSlot() + ((j + i) % len);
+                if (!slotLocks.isItemAllowed(slot, output)) continue;
+                ItemStack current = mInventory[slot];
+                if (current != null && GTUtility.areStacksEqual(current, output)
+                    && current.stackSize + output.stackSize <= output.getMaxStackSize()) {
+                    current.stackSize += output.stackSize;
+                    markDirty();
+                    placed = true;
+                }
+            }
+        }
+        slotLocks.clearMachineLocks(getLockableOutputSlots(), mInventory);
     }
 
     protected boolean canOutput(FluidStack aOutput) {
@@ -968,6 +1060,7 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         if (aIndex < getInputSlot()) return false;
         if (aIndex >= getInputSlot() + mInputSlotCount) return false;
         if (!mAllowInputFromOutputSide && side == aBaseMetaTileEntity.getFrontFacing()) return false;
+        if (!slotLocks.isItemAllowed(aIndex, aStack) || slotLocks.isFull(aIndex, mInventory[aIndex])) return false;
 
         for (int i = getInputSlot(), j = i + mInputSlotCount; i < j; i++) {
             if (GTUtility.areStacksEqual(GTOreDictUnificator.get(aStack), mInventory[i]) && mDisableMultiStack) {
@@ -987,6 +1080,68 @@ public abstract class MTEBasicMachine extends MTEBasicTank implements RecipeMapW
         ItemStack aStack) {
         return !mDisableMultiStack || mInventory[aIndex] == null;
     }
+
+    @Override
+    public boolean isItemValidForSlot(int index, ItemStack itemStack) {
+        return super.isItemValidForSlot(index, itemStack) && slotLocks.isItemAllowed(index, itemStack);
+    }
+
+    @Override
+    public int getSlotLimit(int slot) {
+        return Math.min(super.getSlotLimit(slot), slotLocks.getCapacity(slot));
+    }
+
+    // region ISlotLockable
+
+    @Override
+    public SlotLockState getSlotLockState() {
+        return slotLocks;
+    }
+
+    @Override
+    public int[] getLockableInputSlots() {
+        int[] slots = new int[mInputSlotCount];
+        for (int i = 0; i < slots.length; i++) slots[i] = getInputSlot() + i;
+        return slots;
+    }
+
+    @Override
+    public int[] getLockableOutputSlots() {
+        int[] slots = new int[mOutputItems.length];
+        for (int i = 0; i < slots.length; i++) slots[i] = getOutputSlot() + i;
+        return slots;
+    }
+
+    @Override
+    public boolean acceptsRecipeLock(@Nullable RecipeMap<?> recipeMap) {
+        return recipeMap != null && recipeMap == getRecipeMap();
+    }
+
+    @Override
+    public void lockSlotsToRecipe(List<ItemStack> inputs, List<ItemStack> outputs, List<FluidStack> fluidInputs,
+        List<FluidStack> fluidOutputs) {
+        slotLocks.lockToRecipe(inputs, outputs, getLockableInputSlots(), getLockableOutputSlots(), mInventory);
+        onSlotLocksChanged();
+    }
+
+    @Override
+    public SlotLockTarget getInputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, getLockableInputSlots());
+    }
+
+    @Override
+    public SlotLockTarget getOutputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, getLockableOutputSlots());
+    }
+
+    @Override
+    public void onSlotLocksChanged() {
+        markDirty();
+        IGregTechTileEntity base = getBaseMetaTileEntity();
+        if (base != null) base.markInventoryBeenModified();
+    }
+
+    // endregion
 
     @Override
     public boolean allowSelectCircuit() {
