@@ -25,7 +25,8 @@ public class MTEHatchOutputBusGui extends MTEHatchBaseGui<MTEHatchOutputBus> {
     @Override
     protected Flow createBottomLeftCornerFlow(ModularPanel panel, PanelSyncManager syncManager) {
         return super.createBottomLeftCornerFlow(panel, syncManager)
-            .child(new FilterSlot(machine::getLockedItem, machine::setLockedItem));
+            .child(new FilterSlot(machine::getLockedItem, machine::setLockedItem))
+            .childIf(supportsSlotLockButton(), this::createSlotLockButton);
     }
 
     @Override
@@ -47,6 +48,7 @@ public class MTEHatchOutputBusGui extends MTEHatchBaseGui<MTEHatchOutputBus> {
     protected ParentWidget<?> createContentSection(ModularPanel panel, PanelSyncManager syncManager) {
         return super.createContentSection(panel, syncManager).child(
             new ItemSlotGridBuilder(machine.inventoryHandler, syncManager).size(getDimension())
+                .itemSlotSupplier(this::createMachineItemSlot)
                 .build()
                 .center());
     }
@@ -54,5 +56,10 @@ public class MTEHatchOutputBusGui extends MTEHatchBaseGui<MTEHatchOutputBus> {
     @Override
     protected boolean supportsBottomRowOverlap() {
         return getDimension() <= 4;
+    }
+
+    @Override
+    protected boolean usesSlotLockUi() {
+        return true;
     }
 }

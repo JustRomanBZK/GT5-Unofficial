@@ -14,6 +14,8 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.fluids.Fluid;
+import net.minecraftforge.fluids.FluidRegistry;
 import net.minecraftforge.fluids.FluidStack;
 
 import com.cleanroommc.modularui.factory.PosGuiData;
@@ -23,6 +25,7 @@ import com.cleanroommc.modularui.value.sync.PanelSyncManager;
 
 import gregtech.GTMod;
 import gregtech.api.interfaces.ITexture;
+import gregtech.api.interfaces.metatileentity.IFluidLockableMui2;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.MetaTileEntity;
@@ -37,11 +40,16 @@ import mcp.mobius.waila.api.IWailaConfigHandler;
 import mcp.mobius.waila.api.IWailaDataAccessor;
 
 @IMetaTileEntity.SkipGenerateDescription
-public class MTEHatchInput extends MTEHatch implements ISmartInputHatch {
+public class MTEHatchInput extends MTEHatch implements ISmartInputHatch, IFluidLockableMui2 {
 
     // hatch filter is disabled by default, meaning any fluid can be inserted when in structure.
     public boolean disableFilter = true;
     public RecipeMap<?> mRecipeMap = null;
+    /**
+     * Fluid this hatch is locked to. If {@link #fluidLocked} is set and this is null, nothing can be inserted.
+     */
+    protected Fluid lockedFluid = null;
+    protected boolean fluidLocked = false;
 
     public MTEHatchInput(int aID, String aName, String aNameRegional, int aTier) {
         super(aID, aName, aNameRegional, aTier, 4, (String) null);
@@ -108,6 +116,9 @@ public class MTEHatchInput extends MTEHatch implements ISmartInputHatch {
         if (mRecipeMap != null) {
             aNBT.setString("recipeMap", mRecipeMap.unlocalizedName);
         }
+        aNBT.setBoolean("fluidLocked", fluidLocked);
+        if (lockedFluid != null) aNBT.setString("lockedFluidName", lockedFluid.getName());
+        else aNBT.removeTag("lockedFluidName");
     }
 
     @Override
@@ -115,6 +126,8 @@ public class MTEHatchInput extends MTEHatch implements ISmartInputHatch {
         super.loadNBTData(aNBT);
         disableFilter = aNBT.getBoolean("disableFilter");
         mRecipeMap = RecipeMap.getFromOldIdentifier(aNBT.getString("recipeMap"));
+        fluidLocked = aNBT.getBoolean("fluidLocked");
+        lockedFluid = aNBT.hasKey("lockedFluidName") ? FluidRegistry.getFluid(aNBT.getString("lockedFluidName")) : null;
     }
 
     @Override
@@ -179,8 +192,54 @@ public class MTEHatchInput extends MTEHatch implements ISmartInputHatch {
 
     @Override
     public boolean isFluidInputAllowed(FluidStack aFluid) {
+        if (!isFluidAllowedByLock(aFluid)) return false;
         return mRecipeMap == null || disableFilter || mRecipeMap.containsInput(aFluid);
     }
+
+    /**
+     * @return whether the fluid lock of this hatch allows the given fluid.
+     */
+    public boolean isFluidAllowedByLock(FluidStack aFluid) {
+        if (!fluidLocked) return true;
+        return lockedFluid != null && aFluid != null && aFluid.getFluid() == lockedFluid;
+    }
+
+    // region IFluidLockableMui2
+
+    @Override
+    public void setLockedFluid(Fluid lockedFluid) {
+        this.lockedFluid = lockedFluid;
+        markDirty();
+    }
+
+    @Override
+    public Fluid getLockedFluid() {
+        return lockedFluid;
+    }
+
+    @Override
+    public void lockFluid(boolean lock) {
+        if (lock) {
+            fluidLocked = true;
+            if (lockedFluid == null && mFluid != null) lockedFluid = mFluid.getFluid();
+        } else {
+            fluidLocked = false;
+            lockedFluid = null;
+        }
+        markDirty();
+    }
+
+    @Override
+    public boolean isFluidLocked() {
+        return fluidLocked;
+    }
+
+    @Override
+    public boolean acceptsFluidLock(Fluid fluid) {
+        return true;
+    }
+
+    // endregion
 
     @Override
     public boolean allowPullStack(IGregTechTileEntity aBaseMetaTileEntity, int aIndex, ForgeDirection side,
@@ -192,6 +251,7 @@ public class MTEHatchInput extends MTEHatch implements ISmartInputHatch {
     public boolean allowPutStack(IGregTechTileEntity aBaseMetaTileEntity, int aIndex, ForgeDirection side,
         ItemStack aStack) {
         return side == aBaseMetaTileEntity.getFrontFacing() && aIndex == 0
+            && (!fluidLocked || isFluidAllowedByLock(GTUtility.getFluidForFilledItem(aStack, true)))
             && (mRecipeMap == null || disableFilter
                 || mRecipeMap.containsInput(aStack)
                 || mRecipeMap.containsInput(GTUtility.getFluidForFilledItem(aStack, true)));

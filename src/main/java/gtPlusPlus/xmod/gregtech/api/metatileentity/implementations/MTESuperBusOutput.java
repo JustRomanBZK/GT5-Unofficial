@@ -18,6 +18,11 @@ import gtPlusPlus.core.util.Utils;
 @IMetaTileEntity.SkipGenerateDescription
 public class MTESuperBusOutput extends MTEHatchOutputBus implements IAddGregtechLogo {
 
+    @Override
+    public boolean supportsSlotLocking() {
+        return true;
+    }
+
     public MTESuperBusOutput(int id, String name, String nameRegional, int tier) {
         super(id, name, nameRegional, tier, getSlots(tier));
     }

@@ -58,6 +58,7 @@ public enum GTPacketTypes {
     SYNC_TILE_RENDER_DATA_TO_CLIENT(46, new GTPacketClientMTERendererData()),
     OBSERVE_MACHINE(47, new PacketObserveMachine()),
     OPEN_REMOTE_MTE_GUI(48, new PacketOpenRemoteMteGui()),
+    LOCK_SLOTS_TO_RECIPE(49, new GTPacketLockSlotsToRecipe()),
 
     // merge conflict prevention comment, keep a trailing comma above
     ;

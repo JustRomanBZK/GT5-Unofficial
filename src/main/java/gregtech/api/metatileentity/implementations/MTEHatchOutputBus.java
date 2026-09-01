@@ -6,7 +6,10 @@ import static gregtech.api.util.GTUtility.areStacksEqual;
 import static gregtech.api.util.GTUtility.isStackInvalid;
 import static gregtech.api.util.GTUtility.isStackValid;
 
+import java.util.ArrayList;
 import java.util.BitSet;
+import java.util.Collections;
+import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
@@ -14,6 +17,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.fluids.FluidStack;
 
 import org.jetbrains.annotations.Nullable;
 
@@ -32,23 +36,32 @@ import gregtech.api.interfaces.IOutputBusTransaction;
 import gregtech.api.interfaces.ITexture;
 import gregtech.api.interfaces.metatileentity.IItemLockable;
 import gregtech.api.interfaces.metatileentity.IMetaTileEntity;
+import gregtech.api.interfaces.metatileentity.ISlotLockable;
 import gregtech.api.interfaces.tileentity.IGregTechTileEntity;
 import gregtech.api.metatileentity.MetaTileEntity;
+import gregtech.api.recipe.RecipeMap;
 import gregtech.api.render.TextureFactory;
 import gregtech.api.util.GTDataUtils;
 import gregtech.api.util.GTItemTransfer;
 import gregtech.api.util.GTSplit;
 import gregtech.api.util.GTUtility;
+import gregtech.api.util.slotlock.SlotLockState;
+import gregtech.api.util.slotlock.SlotLockTarget;
 import gregtech.common.gui.modularui.hatch.MTEHatchOutputBusGui;
 import gregtech.common.tileentities.machines.ISmartInputHatch;
 
 @IMetaTileEntity.SkipGenerateDescription
-public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataCopyable, IOutputBus, ISmartInputHatch {
+public class MTEHatchOutputBus extends MTEHatch
+    implements IItemLockable, IDataCopyable, IOutputBus, ISmartInputHatch, ISlotLockable {
 
     private static final String DATA_STICK_DATA_TYPE = "outputBusFilter";
     private static final String LOCKED_ITEM_NBT_KEY = "lockedItem";
 
     protected ItemStack lockedItem = null;
+    /**
+     * Lock state of the item slots, see {@link ISlotLockable}.
+     */
+    public final SlotLockState slotLocks = new SlotLockState(mInventory.length);
 
     public MTEHatchOutputBus(int aID, String aName, String aNameRegional, int aTier) {
         this(aID, aName, aNameRegional, aTier, getSlots(aTier));
@@ -186,11 +199,12 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
 
             // the slot has an item and the stacks can't be merged; ignore it
             if (!isStackInvalid(slot) && !areStacksEqual(slot, stack)) continue;
+            if (!slotLocks.isItemAllowed(i, stack)) continue;
 
             int inSlot = slot == null ? 0 : slot.stackSize;
 
             int toInsert = Math
-                .min(Math.min(getInventoryStackLimit(), getStackSizeLimit(i, slot) - inSlot), stack.stackSize);
+                .min(Math.min(getInventoryStackLimit(), getStackSizeLimit(i, stack) - inSlot), stack.stackSize);
 
             if (toInsert == 0) continue;
 
@@ -264,6 +278,7 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
         if (lockedItem != null) {
             aNBT.setTag(LOCKED_ITEM_NBT_KEY, lockedItem.writeToNBT(new NBTTagCompound()));
         }
+        slotLocks.save(aNBT);
     }
 
     @Override
@@ -272,7 +287,79 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
         if (aNBT.hasKey(LOCKED_ITEM_NBT_KEY)) {
             lockedItem = ItemStack.loadItemStackFromNBT(aNBT.getCompoundTag(LOCKED_ITEM_NBT_KEY));
         }
+        slotLocks.load(aNBT);
     }
+
+    @Override
+    public boolean isItemValidForSlot(int index, ItemStack itemStack) {
+        return super.isItemValidForSlot(index, itemStack) && slotLocks.isItemAllowed(index, itemStack);
+    }
+
+    @Override
+    public int getSlotLimit(int slot) {
+        return Math.min(super.getSlotLimit(slot), slotLocks.getCapacity(slot));
+    }
+
+    // region ISlotLockable
+
+    @Override
+    public SlotLockState getSlotLockState() {
+        return slotLocks;
+    }
+
+    @Override
+    public boolean supportsSlotLocking() {
+        // Subclasses with custom GUIs do not render the lock state; they have to opt in explicitly
+        return getClass() == MTEHatchOutputBus.class;
+    }
+
+    @Override
+    public int[] getLockableInputSlots() {
+        return new int[0];
+    }
+
+    @Override
+    public int[] getLockableOutputSlots() {
+        List<Integer> slots = new ArrayList<>();
+        for (int i = 0; i < mInventory.length; i++) {
+            if (isValidSlot(i)) slots.add(i);
+        }
+        int[] result = new int[slots.size()];
+        for (int i = 0; i < result.length; i++) result[i] = slots.get(i);
+        return result;
+    }
+
+    @Override
+    public boolean acceptsRecipeLock(@Nullable RecipeMap<?> recipeMap) {
+        return supportsSlotLocking() && recipeMap != null;
+    }
+
+    @Override
+    public void lockSlotsToRecipe(List<ItemStack> inputs, List<ItemStack> outputs, List<FluidStack> fluidInputs,
+        List<FluidStack> fluidOutputs) {
+        if (!supportsSlotLocking()) return;
+        slotLocks.lockToRecipe(Collections.emptyList(), outputs, new int[0], getLockableOutputSlots(), mInventory);
+        onSlotLocksChanged();
+    }
+
+    @Override
+    public SlotLockTarget getInputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, new int[0]);
+    }
+
+    @Override
+    public SlotLockTarget getOutputLockTarget() {
+        return new SlotLockTarget(slotLocks, mInventory, getLockableOutputSlots());
+    }
+
+    @Override
+    public void onSlotLocksChanged() {
+        markDirty();
+        IGregTechTileEntity base = getBaseMetaTileEntity();
+        if (base != null) base.markInventoryBeenModified();
+    }
+
+    // endregion
 
     @Override
     public void setLockedItem(@Nullable ItemStack itemStack) {
@@ -344,7 +431,7 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
      */
     @Override
     public int getStackSizeLimit(int slot, @Nullable ItemStack stack) {
-        return Math.min(getInventoryStackLimit(), stack == null ? 64 : stack.getMaxStackSize());
+        return Math.min(getSlotLimit(slot), stack == null ? 64 : stack.getMaxStackSize());
     }
 
     class StandardOutputBusTransaction implements IOutputBusTransaction {
@@ -378,8 +465,6 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
         public boolean storePartial(GTUtility.ItemId id, ItemStack stack) {
             if (!active) throw new IllegalStateException("Cannot add to a transaction after committing it");
 
-            int maxStackSize = getStackSizeLimit(-1, stack);
-
             for (int i = availableSlots.nextSetBit(0); i >= 0; i = availableSlots.nextSetBit(i + 1)) {
                 if (stack.stackSize <= 0) break;
 
@@ -388,7 +473,9 @@ public class MTEHatchOutputBus extends MTEHatch implements IItemLockable, IDataC
 
                 // the slot has an item and the stacks can't be merged; ignore it
                 if (isStackValid(slot) && !areStacksEqual(slot, stack)) continue;
+                if (!slotLocks.isItemAllowed(i, stack)) continue;
 
+                int maxStackSize = getStackSizeLimit(i, stack);
                 int inSlot = slot == null ? 0 : slot.stackSize;
 
                 int toInsert = Math.min(Math.min(getInventoryStackLimit(), maxStackSize - inSlot), stack.stackSize);

@@ -2064,7 +2064,7 @@ public class BaseMetaTileEntity extends CommonBaseMetaTileEntity implements IAct
         }
         final ItemStack fromStack = GTOreDictUnificator.get(stack);
         if (GTUtility.areStacksEqual(toStack, fromStack) && toStack.stackSize + fromStack.stackSize
-            <= Math.min(fromStack.getMaxStackSize(), getInventoryStackLimit())) {
+            <= Math.min(fromStack.getMaxStackSize(), mMetaTileEntity.getStackSizeLimit(slotIndex, fromStack))) {
             toStack.stackSize += fromStack.stackSize;
             markDirty();
             return true;

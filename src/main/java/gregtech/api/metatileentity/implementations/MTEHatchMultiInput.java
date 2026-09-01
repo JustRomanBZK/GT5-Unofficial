@@ -6,6 +6,7 @@ import static gregtech.api.enums.Textures.BlockIcons.OVERLAY_INPUT_HATCH_2x2_COL
 
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraftforge.common.util.ForgeDirection;
+import net.minecraftforge.fluids.Fluid;
 import net.minecraftforge.fluids.FluidStack;
 import net.minecraftforge.fluids.FluidTankInfo;
 
@@ -25,6 +26,11 @@ import gregtech.common.gui.modularui.hatch.MTEHatchMultiInputGui;
 
 @IMetaTileEntity.SkipGenerateDescription
 public class MTEHatchMultiInput extends MTEHatchInput {
+
+    @Override
+    public boolean acceptsFluidLock(Fluid fluid) {
+        return false;
+    }
 
     private final FluidStack[] mStoredFluid;
     private final FluidStackTank[] fluidTanks;

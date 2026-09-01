@@ -16,6 +16,11 @@ import gtPlusPlus.core.util.Utils;
 public class MTEHatchSuperBusInput extends MTEHatchInputBus {
 
     @Override
+    public boolean supportsSlotLocking() {
+        return true;
+    }
+
+    @Override
     protected boolean useMui2() {
         return false;
     }
