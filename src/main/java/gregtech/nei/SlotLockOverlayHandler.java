@@ -1,7 +1,6 @@
 package gregtech.nei;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import net.minecraft.client.Minecraft;
@@ -84,7 +83,8 @@ public class SlotLockOverlayHandler implements IOverlayHandler {
 
     @Override
     public boolean canFillCraftingGrid(GuiContainer gui, IRecipeHandler handler, int recipeIndex) {
-        return false;
+        // NEI only invokes the overlay handler on click when this returns true
+        return canHandle(gui, handler instanceof GTNEIDefaultHandler gtHandler ? gtHandler.getRecipeMap() : null);
     }
 
     @Override
@@ -95,7 +95,12 @@ public class SlotLockOverlayHandler implements IOverlayHandler {
     @Override
     public List<GuiOverlayButton.ItemOverlayState> presenceOverlay(GuiContainer gui, IRecipeHandler handler,
         int recipeIndex) {
-        return Collections.emptyList();
+        // Locking does not need the ingredients, so never report missing items
+        List<GuiOverlayButton.ItemOverlayState> states = new ArrayList<>();
+        for (PositionedStack stack : handler.getIngredientStacks(recipeIndex)) {
+            states.add(new GuiOverlayButton.ItemOverlayState(stack, true));
+        }
+        return states;
     }
 
     private static void lockSlots(GuiContainer gui, IRecipeHandler handler, int recipeIndex) {

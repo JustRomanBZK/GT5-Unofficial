@@ -162,8 +162,8 @@ public final class SlotLockState {
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * Toggles the player lock of a slot. If the slot is already locked to nothing and the player holds an item, the
-     * slot gets locked to that item instead of being unlocked.
+     * Toggles the player lock of a slot. If the player holds an item and the slot is empty or locked to nothing, the
+     * slot gets locked to that item instead.
      *
      * @param current the current content of the slot
      * @param cursor  the item held by the player, if any
@@ -171,10 +171,17 @@ public final class SlotLockState {
     public void togglePlayerLock(int slot, @Nullable ItemStack current, @Nullable ItemStack cursor) {
         if (!inRange(slot)) return;
         if (playerLocked[slot] && lockedItems[slot] == null && cursor != null) {
+            // Locked to nothing: the held item becomes the lock target
             lockedItems[slot] = copyOne(cursor);
-        } else {
-            playerLocked[slot] = !playerLocked[slot];
-        }
+        } else if (!playerLocked[slot] && current == null
+            && cursor != null
+            && (!machineLocked[slot] || matches(lockedItems[slot], cursor))) {
+                // Empty unlocked slot: lock directly to the held item
+                lockedItems[slot] = copyOne(cursor);
+                playerLocked[slot] = true;
+            } else {
+                playerLocked[slot] = !playerLocked[slot];
+            }
         updateLockedItem(slot, current);
     }
 
