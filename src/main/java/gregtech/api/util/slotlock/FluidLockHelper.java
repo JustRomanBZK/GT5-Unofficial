@@ -12,8 +12,8 @@ import gregtech.api.metatileentity.implementations.MTEHatchOutput;
 
 /**
  * Locks fluid hatches of a multiblock to the fluids of a recipe, mirroring {@link SlotLockState#lockToRecipe} for
- * fluids: enough hatches are locked to hold the required amount of every fluid, hatches already containing the fluid
- * are preferred and existing locks are never overridden.
+ * fluids: previous locks are removed, enough hatches are locked to hold the required amount of every fluid and hatches
+ * already containing the fluid are preferred.
  */
 public final class FluidLockHelper {
 
@@ -32,6 +32,15 @@ public final class FluidLockHelper {
             if (hatch instanceof IFluidLockableMui2) lockables.add(hatch);
         }
         if (lockables.isEmpty()) return;
+
+        // Locks of a previous recipe are replaced
+        for (MTEBasicTank tank : lockables) {
+            IFluidLockableMui2 lockable = (IFluidLockableMui2) tank;
+            if (lockable.isFluidLocked() && lockable.acceptsFluidLock(lockable.getLockedFluid())) {
+                lockable.setLockedFluid(null);
+                lockable.lockFluid(false);
+            }
+        }
 
         for (FluidStack fluid : fluids) {
             if (fluid == null || fluid.getFluid() == null) continue;

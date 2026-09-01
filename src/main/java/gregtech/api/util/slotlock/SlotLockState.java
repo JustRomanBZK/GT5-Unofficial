@@ -236,6 +236,17 @@ public final class SlotLockState {
         updateLockedItem(slot, current);
     }
 
+    /**
+     * Removes the player locks of the given slots. Machine locks and capacities are kept.
+     */
+    public void clearPlayerLocks(int[] slots, ItemStack[] inventory) {
+        for (int slot : slots) {
+            if (!inRange(slot) || !playerLocked[slot]) continue;
+            playerLocked[slot] = false;
+            updateLockedItem(slot, slot < inventory.length ? inventory[slot] : null);
+        }
+    }
+
     public void clearMachineLocks(int[] slots, ItemStack[] inventory) {
         for (int slot : slots) {
             disableMachineLock(slot, inRange(slot) && slot < inventory.length ? inventory[slot] : null);
@@ -255,9 +266,9 @@ public final class SlotLockState {
     // ---------------------------------------------------------------------------------------------------------------
 
     /**
-     * Locks the given input and output slots so that they only accept the items of a recipe. Enough slots are locked
-     * to hold the required amount of every item (taking the slot capacities into account). Existing locks are never
-     * overridden, except locks to nothing. Finally, all remaining empty and unlocked slots are locked to nothing.
+     * Locks the given input and output slots so that they only accept the items of a recipe. Previous player locks are
+     * removed first. Enough slots are locked to hold the required amount of every item (taking the slot capacities into
+     * account). Finally, all remaining empty and unlocked slots are locked to nothing.
      *
      * @param inputs      the recipe inputs, stack size = required amount
      * @param outputs     the recipe outputs, stack size = produced amount
@@ -276,10 +287,15 @@ public final class SlotLockState {
 
     /**
      * Locks slots spread over several inventories (e.g. the busses of a multiblock) to the items of a recipe. See
-     * {@link #lockToRecipe(List, List, int[], int[], ItemStack[])}.
+     * {@link #lockToRecipe(List, List, int[], int[], ItemStack[])}. Player locks set for a previous recipe are removed
+     * first, so selecting another recipe replaces the old configuration.
      */
     public static void lockToRecipe(List<ItemStack> inputs, List<ItemStack> outputs, List<SlotLockTarget> inputTargets,
         List<SlotLockTarget> outputTargets) {
+        for (SlotLockTarget target : inputTargets) target.state()
+            .clearPlayerLocks(target.slots(), target.inventory());
+        for (SlotLockTarget target : outputTargets) target.state()
+            .clearPlayerLocks(target.slots(), target.inventory());
         for (ItemStack input : inputs) lockForStack(input, inputTargets);
         for (ItemStack output : outputs) lockForStack(output, outputTargets);
         if (!inputs.isEmpty()) lockRemaining(inputTargets);
