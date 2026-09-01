@@ -5,6 +5,7 @@ import java.util.List;
 
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.network.INetHandler;
 import net.minecraft.network.NetHandlerPlayServer;
 import net.minecraft.tileentity.TileEntity;
@@ -81,9 +82,12 @@ public class GTPacketLockSlotsToRecipe extends GTPacket {
     private static void writeStacks(ByteBuf aOut, List<ItemStack> stacks) {
         ByteBufUtils.writeVarInt(aOut, stacks.size(), 5);
         for (ItemStack stack : stacks) {
-            // Amount is written separately, ItemStack encoding only supports a byte sized stack size
+            // Amount is written separately, the NBT encoding only supports a byte sized stack size
             ByteBufUtils.writeVarInt(aOut, Math.max(1, stack.stackSize), 5);
-            ByteBufUtils.writeItemStack(aOut, GTUtility.copyAmount(1, stack));
+            ByteBufUtils.writeTag(
+                aOut,
+                GTUtility.copyAmount(1, stack)
+                    .writeToNBT(new NBTTagCompound()));
         }
     }
 
@@ -92,7 +96,8 @@ public class GTPacketLockSlotsToRecipe extends GTPacket {
         List<ItemStack> stacks = new ArrayList<>(count);
         for (int i = 0; i < count; i++) {
             int amount = readVarInt(aData, 5);
-            ItemStack stack = GTByteBuffer.readItemStackFromGreggyByteBuf(aData);
+            NBTTagCompound tag = GTByteBuffer.readCompoundTagFromGreggyByteBuf(aData);
+            ItemStack stack = tag == null ? null : ItemStack.loadItemStackFromNBT(tag);
             if (stack == null) continue;
             stack.stackSize = amount;
             stacks.add(stack);
